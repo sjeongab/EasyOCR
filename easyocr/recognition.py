@@ -55,6 +55,7 @@ class ListDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, index):
         img = self.image_list[index]
+
         return Image.fromarray(img, 'L')
 
 class AlignCollate(object):
@@ -105,10 +106,35 @@ def recognizer_predict(model, converter, test_loader, batch_max_length,\
             # For max length prediction
             length_for_pred = torch.IntTensor([batch_max_length] * batch_size).to(device)
             text_for_pred = torch.LongTensor(batch_size, batch_max_length + 1).fill_(0).to(device)
+            #preds = model(image, text_for_pred)
+            import numpy as np
+            import cv2
+            batch_size=1
+            x = torch.rand(batch_size,1,64,256).float().cpu()
+            y = torch.ones(128,1,1).float().cpu()
+            inputs = ['images']
+            outputs = ['scores']
+            dynamic_axes = {'images': {0: 'batch_size'}, 'scores': {0: 'batch_size'}}
+            torch.onnx.export(model, (image,text_for_pred), "ocr0819_0.onnx", keep_initializers_as_inputs=True)
 
-            preds = model(image, text_for_pred)
+            # onnx tester
+            import onnx
+            import caffe2.python.onnx.backend as backend
 
-            # Select max probabilty (greedy decoding) then decode index to character
+            onnx_model = onnx.load("ocr0819_0.onnx")
+            onnx.checker.check_model(onnx_model)
+            output = backend.run_model(onnx_model, np.array(image))
+            preds = torch.from_numpy(output[0])
+            net = cv2.dnn.readNetFromONNX("ocr0819_0.onnx")
+            n = np.array(image)
+            print(image.size())
+            print(np.shape(n))
+
+            img = cv2.cvtColor(cv2.imread('5.png'), cv2.COLOR_BGR2GRAY)
+            blob= cv2.dnn.blobFromImage(img, size=(64,256))
+            net.setInput(blob)
+            #net.setInput(n)
+            preds = net.forward()
             preds_size = torch.IntTensor([preds.size(1)] * batch_size)
 
             ######## filter ignore_char, rebalance
@@ -137,6 +163,7 @@ def recognizer_predict(model, converter, test_loader, batch_max_length,\
             for pred, pred_max_prob in zip(preds_str, preds_max_prob):
                 confidence_score = pred_max_prob.cumprod(dim=0)[-1]
                 result.append([pred, confidence_score.item()])
+
 
     return result
 
